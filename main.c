@@ -4,7 +4,7 @@
 #include <string.h>
 #include "font.h"
 
-PSP_MODULE_INFO("PSP Auto", 0, 0, 2);
+PSP_MODULE_INFO("PSP Auto", 0, 0, 3);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define W 480
 #define H 272
@@ -18,7 +18,8 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define BLUE RGB(83,177,244)
 #define GREEN RGB(100,218,165)
 #define ORANGE RGB(255,192,108)
-static unsigned int *fb = (unsigned int*)0x04000000;
+/* Write through the uncached VRAM alias so PPSSPP and PSP see solid fills. */
+static volatile unsigned int *fb = (volatile unsigned int*)0x44000000;
 static volatile int running = 1;
 static int selected = 0; /* 0..3 */
 static int page = -1; /* -1 home, 0..3 details */
@@ -66,7 +67,7 @@ static void card(int x,int y,int w,int h,int isselected){rect(x,y,w,h,PANEL);if(
 static void header(void){
  rect(0,0,W,45,RGB(17,27,41));rect(0,44,W,1,RGB(39,61,82));
  label(18,13,"PSP",WHITE,2);label(70,13,"AUTO",BLUE,2);
- label(192,17,"v0.2  OFFLINE DEMO",MUTED,1);
+ label(192,17,"v0.3  OFFLINE DEMO",MUTED,1);
  rect(402,13,9,9,ORANGE);label(418,13,"OFF",MUTED,1);battery(445,29,GREEN);
 }
 static void footer(const char *msg){rect(0,246,W,26,RGB(17,27,41));label(16,253,msg,MUTED,1);}
@@ -108,7 +109,7 @@ static void phone(void){
 }
 static void settings(void){
  back_header("SETTINGS");rect(18,94,444,141,PANEL);
- label(36,110,"PSP AUTO 0.2",WHITE,2);
+ label(36,110,"PSP AUTO 0.3",WHITE,2);
  label(36,149,"NETWORK: OFFLINE",MUTED,1);
  label(36,170,"MODE: GRAPHICAL DEMONSTRATION",MUTED,1);
  label(36,196,theme?"THEME ACCENT: GREEN":"THEME ACCENT: BLUE",BLUE,1);
@@ -117,7 +118,7 @@ static void settings(void){
 static void render(void){
  rect(0,0,W,H,BG);
  if(page<0)home();else if(page==0)navigation();else if(page==1)music();else if(page==2)phone();else settings();
- sceKernelDcacheWritebackAll();
+ /* Uncached VRAM writes need no data-cache flush. */
 }
 int main(void){
  SceCtrlData pad;unsigned int previous=0;
