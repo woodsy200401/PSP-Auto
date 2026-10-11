@@ -28,7 +28,7 @@ static const char *names[] = {"NAVIGATION", "MUSIC", "PHONE", "SETTINGS"};
 
 static int exit_cb(int a,int b,void *c){(void)a;(void)b;(void)c;running=0;return 0;}
 static int callbacks(SceSize a, void *b){(void)a;(void)b;int id=sceKernelCreateCallback("exit",exit_cb,0);sceKernelRegisterExitCallback(id);sceKernelSleepThreadCB();return 0;}
-static void start_callbacks(void){int id=sceKernelCreateThread("callbacks",callbacks,0x11,0x1000,0,0);if(id>=0)sceKernelStartThread(id,0);}
+static void start_callbacks(void){int id=sceKernelCreateThread("callbacks",callbacks,0x11,0x1000,0,0);if(id>=0)sceKernelStartThread(id,0,NULL);}
 
 static void rect(int x,int y,int w,int h,unsigned int color){
  int j,i,x2=x+w,y2=y;
