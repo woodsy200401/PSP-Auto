@@ -1,15 +1,9 @@
-# PSP Auto 0.1 — PPSSPP build kit
+# PSP Auto v0.2
+Graphical homebrew dashboard for PSP-1000 and PPSSPP.
 
-This kit contains the original offline PSP homebrew prototype and a GitHub Actions build workflow.
+## Update GitHub using Android
+In your existing PSP-Auto GitHub repository, replace the old `main.c` and `Makefile` with the versions here, and **add `font.h`**. The existing `.github/workflows/build.yml` can stay unchanged if it already builds v0.1 successfully. Go to Actions > Build PSP Auto > Run workflow, download PSPAuto-PPSSPP artifact, extract EBOOT.PBP and open in PPSSPP.
 
-## Build without installing a compiler
+*Works offline.* Navigation/map and phone/media information are mockups; the Android bridge is not built yet. `X` toggles a display label in Music and Settings but does not control playback or connectivity.
 
-1. Create a GitHub repository and upload `main.c`, `Makefile`, and `.github/workflows/build.yml` in their exact relative paths (hidden `.github` directory must be included).
-2. Open repository **Actions** → **Build PSP Auto** → **Run workflow**, or push a commit to main/master to trigger the build.
-3. Open the successful run → **Artifacts** → download `PSPAuto-PPSSPP` ZIP. Extract `EBOOT.PBP`.
-4. On Android, save `EBOOT.PBP` under `PSP/GAME/PSPAUTO/EBOOT.PBP` inside a storage folder accessible to PPSSPP. Alternatively, use PPSSPP's Browse command to navigate to the containing folder and open `EBOOT.PBP`.
-5. Control with PPSSPP's on-screen D-pad, Cross, Circle, Start.
-
-Offline placeholder screens only. The source has NOT been compiled or tested in this environment; GitHub Actions runs the official toolchain and will report compilation errors, if any.
-
-Toolchain: https://github.com/pspdev/pspdev
+Requirements: PSPDEV toolchain, or GitHub Actions workflow.
