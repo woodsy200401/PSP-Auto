@@ -1,9 +1,14 @@
-# PSP Auto v0.3 framebuffer fix
+# PSP Auto v0.4 — GU renderer
 
-This replaces the v0.2 source and addresses the likely reason why lines appeared but filled rectangles and text did not: writes to the cached VRAM alias were not consistently visible to the display. The renderer now writes to PSP's uncached VRAM alias (0x44000000) while the display uses 0x04000000. It also corrects the callback start signature.
+This is an **untested source build**, not a precompiled EBOOT.
 
-## Updating GitHub from a phone
+## Why this version is different
+Previous versions drew pixels directly into VRAM. This version uses the PSP Graphics Utility (sceGu) to clear and draw the entire screen, with double buffering. It is intended to fix missing solid rectangles and text in PPSSPP.
 
-Keep your existing .github/workflows/build.yml unchanged. Replace the repository root `main.c` and `Makefile` with these files. Keep `font.h` as-is (or replace it with this identical version). Run the GitHub Actions workflow and download the resulting EBOOT.PBP.
+## Upload to your existing GitHub repository
+Replace root-level `main.c`, `Makefile`, and `font.h` with the files in this ZIP. Keep your existing `.github/workflows/build.yml`. Run the workflow and download the NEW EBOOT.PBP artifact.
 
-This is an untested candidate fix, not a verified executable. If the dashboard still shows only lines, share the new screenshot.
+## Controls
+D-pad: choose tile; X: open; Circle: back; Start: exit.
+
+The navigation and media displays are still demonstrations. No phone bridge exists yet.

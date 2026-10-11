@@ -1,10 +1,12 @@
 #include <pspkernel.h>
 #include <pspctrl.h>
 #include <pspdisplay.h>
+#include <pspgu.h>
+#include <pspgum.h>
 #include <string.h>
 #include "font.h"
 
-PSP_MODULE_INFO("PSP Auto", 0, 0, 3);
+PSP_MODULE_INFO("PSP Auto", 0, 0, 4);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define W 480
 #define H 272
@@ -18,8 +20,16 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define BLUE RGB(83,177,244)
 #define GREEN RGB(100,218,165)
 #define ORANGE RGB(255,192,108)
-/* Write through the uncached VRAM alias so PPSSPP and PSP see solid fills. */
-static volatile unsigned int *fb = (volatile unsigned int*)0x44000000;
+/* All UI drawing goes through the PSP Graphics Utility (GU). */
+static unsigned int __attribute__((aligned(16))) gu_list[262144];
+typedef struct { unsigned int color; short x,y,z; } Vertex;
+static void gpu_rect(int x,int y,int w,int h,unsigned int color){
+ if(w<=0||h<=0)return;
+ Vertex *v=(Vertex*)sceGuGetMemory(2*sizeof(Vertex));
+ v[0].color=color;v[0].x=x;v[0].y=y;v[0].z=0;
+ v[1].color=color;v[1].x=x+w;v[1].y=y+h;v[1].z=0;
+ sceGuDrawArray(GU_SPRITES,GU_COLOR_8888|GU_VERTEX_16BIT|GU_TRANSFORM_2D,2,0,v);
+}
 static volatile int running = 1;
 static int selected = 0; /* 0..3 */
 static int page = -1; /* -1 home, 0..3 details */
@@ -32,11 +42,11 @@ static int callbacks(SceSize a, void *b){(void)a;(void)b;int id=sceKernelCreateC
 static void start_callbacks(void){int id=sceKernelCreateThread("callbacks",callbacks,0x11,0x1000,0,0);if(id>=0)sceKernelStartThread(id,0,NULL);}
 
 static void rect(int x,int y,int w,int h,unsigned int color){
- int j,i,x2=x+w,y2=y;
+ int x2=x+w,y2=y+h;
  if(x<0)x=0;if(y<0)y=0;if(x2>W)x2=W;if(y2>H)y2=H;
- for(j=y;j<y2;j++)for(i=x;i<x2;i++)fb[j*PITCH+i]=color;
+ gpu_rect(x,y,x2-x,y2-y,color);
 }
-static void dot(int x,int y,unsigned int color){if(x>=0&&x<W&&y>=0&&y<H)fb[y*PITCH+x]=color;}
+static void dot(int x,int y,unsigned int color){if(x>=0&&x<W&&y>=0&&y<H)rect(x,y,1,1,color);}
 static void line(int x0,int y0,int x1,int y1,unsigned int col){
  int dx=x1>x0?x1-x0:x0-x1, sx=x0<x1?1:-1;
  int dy=-(y1>y0?y1-y0:y0-y1), sy=y0<y1?1:-1,err=dx+dy;
@@ -67,7 +77,7 @@ static void card(int x,int y,int w,int h,int isselected){rect(x,y,w,h,PANEL);if(
 static void header(void){
  rect(0,0,W,45,RGB(17,27,41));rect(0,44,W,1,RGB(39,61,82));
  label(18,13,"PSP",WHITE,2);label(70,13,"AUTO",BLUE,2);
- label(192,17,"v0.3  OFFLINE DEMO",MUTED,1);
+ label(192,17,"v0.4  GRAPHICS TEST",MUTED,1);
  rect(402,13,9,9,ORANGE);label(418,13,"OFF",MUTED,1);battery(445,29,GREEN);
 }
 static void footer(const char *msg){rect(0,246,W,26,RGB(17,27,41));label(16,253,msg,MUTED,1);}
@@ -104,27 +114,46 @@ static void phone(void){
  phoneicon(45,119,ORANGE);label(93,108,"COMPANION DEVICE",ORANGE,1);
  label(93,139,"SAMSUNG ANDROID",WHITE,2);
  label(93,174,"STATUS: NOT CONNECTED",MUTED,1);
- label(93,195,"ANDROID BRIDGE PLANNED FOR v0.3",MUTED,1);
+ label(93,195,"ANDROID BRIDGE PLANNED FOR v0.5",MUTED,1);
  footer("CIRCLE: BACK     START: EXIT");
 }
 static void settings(void){
  back_header("SETTINGS");rect(18,94,444,141,PANEL);
- label(36,110,"PSP AUTO 0.3",WHITE,2);
+ label(36,110,"PSP AUTO 0.4",WHITE,2);
  label(36,149,"NETWORK: OFFLINE",MUTED,1);
  label(36,170,"MODE: GRAPHICAL DEMONSTRATION",MUTED,1);
  label(36,196,theme?"THEME ACCENT: GREEN":"THEME ACCENT: BLUE",BLUE,1);
  footer("X: CHANGE ACCENT LABEL   CIRCLE: BACK");
 }
 static void render(void){
+ sceGuStart(GU_DIRECT,gu_list);
+ sceGuClearColor(BG);
+ sceGuClear(GU_COLOR_BUFFER_BIT);
  rect(0,0,W,H,BG);
  if(page<0)home();else if(page==0)navigation();else if(page==1)music();else if(page==2)phone();else settings();
- /* Uncached VRAM writes need no data-cache flush. */
+ sceGuFinish();
+ sceGuSync(0,0);
+ sceDisplayWaitVblankStart();
+ sceGuSwapBuffers();
 }
 int main(void){
  SceCtrlData pad;unsigned int previous=0;
  start_callbacks();sceCtrlSetSamplingCycle(0);sceCtrlSetSamplingMode(PSP_CTRL_MODE_DIGITAL);
- sceDisplaySetMode(0,W,H);
- sceDisplaySetFrameBuf((void*)0x04000000,PITCH,PSP_DISPLAY_PIXEL_FORMAT_8888,PSP_DISPLAY_SETBUF_IMMEDIATE);
+ sceGuInit();
+ sceGuStart(GU_DIRECT,gu_list);
+ sceGuDrawBuffer(GU_PSM_8888,(void*)0,PITCH);
+ sceGuDispBuffer(W,H,(void*)(PITCH*H*4),PITCH);
+ sceGuOffset(2048-(W/2),2048-(H/2));
+ sceGuViewport(2048,2048,W,H);
+ sceGuScissor(0,0,W,H);
+ sceGuEnable(GU_SCISSOR_TEST);
+ sceGuDisable(GU_DEPTH_TEST);
+ sceGuDisable(GU_TEXTURE_2D);
+ sceGuDisable(GU_BLEND);
+ sceGuFinish();
+ sceGuSync(0,0);
+ sceDisplayWaitVblankStart();
+ sceGuDisplay(GU_TRUE);
  render();
  while(running){unsigned int pressed;
  sceCtrlPeekBufferPositive(&pad,1);pressed=pad.Buttons & ~previous;
@@ -141,5 +170,5 @@ int main(void){
  if((pressed & PSP_CTRL_CROSS)&&page==3)theme=!theme;
  }
  if(pressed)render();previous=pad.Buttons;sceDisplayWaitVblankStart();}
- sceKernelExitGame();return 0;
+ sceGuTerm();sceKernelExitGame();return 0;
 }
