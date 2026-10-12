@@ -4,9 +4,18 @@
 #include <pspgu.h>
 #include <pspgum.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <pspnet.h>
+#include <pspnet_inet.h>
+#include <pspnet_apctl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include "font.h"
 
-PSP_MODULE_INFO("PSP Auto", 0, 0, 4);
+PSP_MODULE_INFO("PSP Auto", 0, 0, 5);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 #define W 480
 #define H 272
@@ -35,6 +44,45 @@ static int selected = 0; /* 0..3 */
 static int page = -1; /* -1 home, 0..3 details */
 static int playing = 0;
 static int theme = 0;
+static int net_ready = 0, link_ok = 0, battery_pct = -1;
+static char bridge_time[24] = "--:--";
+static char bridge_track[48] = "NO TRACK";
+static char bridge_artist[48] = "NOT CONNECTED";
+static char bridge_status[48] = "NOT TESTED";
+static void read_value(const char *body,const char *key,char *dest,int capacity){
+ char needle[48];const char *p,*e;int n;
+ snprintf(needle,sizeof(needle),"%s=",key);
+ p=strstr(body,needle);if(!p)return;p+=strlen(needle);
+ e=strchr(p,'\n');if(!e)e=p+strlen(p);
+ n=(int)(e-p);if(n>=capacity)n=capacity-1;
+ memcpy(dest,p,n);dest[n]=0;
+}
+static void bridge_fetch(void){
+ int fd,rc;struct sockaddr_in addr;char buffer[1024];int n;
+ if(!net_ready){
+   rc=sceNetInit(128*1024,42,0,42,0);
+   if(rc<0){strcpy(bridge_status,"NET INIT FAILED");return;}
+   rc=sceNetInetInit();
+   if(rc<0){strcpy(bridge_status,"INET NOT SUPPORTED");return;}
+   net_ready=1;
+ }
+ fd=socket(AF_INET,SOCK_STREAM,0);
+ if(fd<0){strcpy(bridge_status,"SOCKET FAILED");return;}
+ memset(&addr,0,sizeof(addr));addr.sin_family=AF_INET;
+ addr.sin_port=htons(8765);addr.sin_addr.s_addr=inet_addr("127.0.0.1");
+ rc=connect(fd,(struct sockaddr*)&addr,sizeof(addr));
+ if(rc<0){strcpy(bridge_status,"LOCALHOST UNREACHABLE");link_ok=0;close(fd);return;}
+ send(fd,"GET /status HTTP/1.0\r\nHost: localhost\r\n\r\n",41,0);
+ n=recv(fd,buffer,sizeof(buffer)-1,0);close(fd);
+ if(n<=0){strcpy(bridge_status,"NO RESPONSE");link_ok=0;return;}
+ buffer[n]=0;
+ if(!strstr(buffer,"200 OK")){strcpy(bridge_status,"BAD RESPONSE");link_ok=0;return;}
+ read_value(buffer,"time",bridge_time,sizeof(bridge_time));
+ read_value(buffer,"track",bridge_track,sizeof(bridge_track));
+ read_value(buffer,"artist",bridge_artist,sizeof(bridge_artist));
+ {char num[12]="";read_value(buffer,"battery",num,sizeof(num));battery_pct=atoi(num);}
+ strcpy(bridge_status,"CONNECTED");link_ok=1;
+}
 static const char *names[] = {"NAVIGATION", "MUSIC", "PHONE", "SETTINGS"};
 
 static int exit_cb(int a,int b,void *c){(void)a;(void)b;(void)c;running=0;return 0;}
@@ -77,8 +125,8 @@ static void card(int x,int y,int w,int h,int isselected){rect(x,y,w,h,PANEL);if(
 static void header(void){
  rect(0,0,W,45,RGB(17,27,41));rect(0,44,W,1,RGB(39,61,82));
  label(18,13,"PSP",WHITE,2);label(70,13,"AUTO",BLUE,2);
- label(192,17,"v0.4  GRAPHICS TEST",MUTED,1);
- rect(402,13,9,9,ORANGE);label(418,13,"OFF",MUTED,1);battery(445,29,GREEN);
+ label(192,17,"v0.5  BRIDGE TEST",MUTED,1);
+ rect(402,13,9,9,ORANGE);label(418,13,link_ok?"ON":"OFF",link_ok?GREEN:MUTED,1);battery(445,29,GREEN);
 }
 static void footer(const char *msg){rect(0,246,W,26,RGB(17,27,41));label(16,253,msg,MUTED,1);}
 static void home(void){
@@ -87,10 +135,10 @@ static void home(void){
  navart(31,102);label(31,86,"NAVIGATION",BLUE,1);
  label(39,215,"NO ROUTE SET",WHITE,1);
  label(258,88,"MUSIC",GREEN,1);musicicon(257,108,GREEN);
- label(309,113,"NO TRACK",WHITE,1);label(309,128,"CONNECTED",MUTED,1);
+ label(309,113,bridge_track,WHITE,1);label(309,128,link_ok?"LIVE DATA":"OFFLINE",MUTED,1);
  label(257,170,"PHONE",ORANGE,1);phoneicon(261,190,ORANGE);
  label(370,170,"SETTINGS",BLUE,1);cog(384,194,BLUE);
- footer("D-PAD: CHOOSE     X: OPEN     START: EXIT");
+ footer("D-PAD: CHOOSE   X: OPEN   TRIANGLE: CONNECT");
 }
 static void back_header(const char *name){header();label(20,57,name,WHITE,2);}
 static void navigation(void){
@@ -98,13 +146,13 @@ static void navigation(void){
  rect(18,94,283,141,PANEL);navart(29,104);
  rect(315,94,147,141,PANEL);label(328,109,"NEXT TURN",BLUE,1);
  arrow(363,138,BLUE);label(331,180,"AWAITING",WHITE,1);label(331,196,"PHONE LINK",WHITE,1);
- label(34,223,"MAP DEMO",MUTED,1);footer("CIRCLE: BACK     START: EXIT");
+ label(34,223,"MAP DEMO",MUTED,1);footer("TRIANGLE: CONNECT    CIRCLE: BACK");
 }
 static void music(void){
  back_header("MUSIC");rect(18,94,142,141,PANEL2);musicicon(57,135,GREEN);
  rect(173,94,289,141,PANEL);label(187,111,"NOW PLAYING",GREEN,1);
- label(187,138,"NO MEDIA CONNECTED",WHITE,1);
- label(187,158,"PHONE BRIDGE COMING SOON",MUTED,1);
+ label(187,138,bridge_track,WHITE,1);
+ label(187,158,bridge_artist,MUTED,1);
  label(187,199,playing?"[ PAUSE ]":"[ PLAY ]",GREEN,1);
  label(283,199,"< PREV    NEXT >",MUTED,1);
  footer("X: TOGGLE DEMO PLAY    CIRCLE: BACK");
@@ -113,14 +161,14 @@ static void phone(void){
  back_header("PHONE");rect(18,94,444,141,PANEL);
  phoneicon(45,119,ORANGE);label(93,108,"COMPANION DEVICE",ORANGE,1);
  label(93,139,"SAMSUNG ANDROID",WHITE,2);
- label(93,174,"STATUS: NOT CONNECTED",MUTED,1);
- label(93,195,"ANDROID BRIDGE PLANNED FOR v0.5",MUTED,1);
- footer("CIRCLE: BACK     START: EXIT");
+ label(93,174,bridge_status,MUTED,1);
+ {char s[50];snprintf(s,sizeof(s),"BATTERY: %d%%  TIME: %s",battery_pct,bridge_time);label(93,195,s,MUTED,1);}
+ footer("TRIANGLE: CONNECT    CIRCLE: BACK");
 }
 static void settings(void){
  back_header("SETTINGS");rect(18,94,444,141,PANEL);
- label(36,110,"PSP AUTO 0.4",WHITE,2);
- label(36,149,"NETWORK: OFFLINE",MUTED,1);
+ label(36,110,"PSP AUTO 0.5",WHITE,2);
+ label(36,149,bridge_status,MUTED,1);
  label(36,170,"MODE: GRAPHICAL DEMONSTRATION",MUTED,1);
  label(36,196,theme?"THEME ACCENT: GREEN":"THEME ACCENT: BLUE",BLUE,1);
  footer("X: CHANGE ACCENT LABEL   CIRCLE: BACK");
@@ -158,6 +206,7 @@ int main(void){
  while(running){unsigned int pressed;
  sceCtrlPeekBufferPositive(&pad,1);pressed=pad.Buttons & ~previous;
  if(pressed & PSP_CTRL_START)break;
+ if(pressed & PSP_CTRL_TRIANGLE)bridge_fetch();
  if(page<0){
  if(pressed & PSP_CTRL_LEFT)selected=(selected+3)%4;
  if(pressed & PSP_CTRL_RIGHT)selected=(selected+1)%4;
@@ -170,5 +219,5 @@ int main(void){
  if((pressed & PSP_CTRL_CROSS)&&page==3)theme=!theme;
  }
  if(pressed)render();previous=pad.Buttons;sceDisplayWaitVblankStart();}
- sceGuTerm();sceKernelExitGame();return 0;
+ if(net_ready){sceNetInetTerm();sceNetTerm();}sceGuTerm();sceKernelExitGame();return 0;
 }
