@@ -58,7 +58,11 @@ static void read_value(const char *body,const char *key,char *dest,int capacity)
  memcpy(dest,p,n);dest[n]=0;
 }
 static void bridge_fetch(void){
- int fd,rc;struct sockaddr_in addr;char buffer[1024];int n;
+ int fd,rc,n,total=0,tries;struct sockaddr_in addr;
+ char buffer[2048],*body,*header_end;
+ const char *request="GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+ struct timeval tv;
+ link_ok=0;
  if(!net_ready){
    rc=sceNetInit(128*1024,42,0,42,0);
    if(rc<0){strcpy(bridge_status,"NET INIT FAILED");return;}
@@ -68,19 +72,37 @@ static void bridge_fetch(void){
  }
  fd=socket(AF_INET,SOCK_STREAM,0);
  if(fd<0){strcpy(bridge_status,"SOCKET FAILED");return;}
+ tv.tv_sec=3;tv.tv_usec=0;
+ setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+ setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
  memset(&addr,0,sizeof(addr));addr.sin_family=AF_INET;
  addr.sin_port=htons(8765);addr.sin_addr.s_addr=inet_addr("127.0.0.1");
  rc=connect(fd,(struct sockaddr*)&addr,sizeof(addr));
- if(rc<0){strcpy(bridge_status,"LOCALHOST UNREACHABLE");link_ok=0;close(fd);return;}
- send(fd,"GET /status HTTP/1.0\r\nHost: localhost\r\n\r\n",41,0);
- n=recv(fd,buffer,sizeof(buffer)-1,0);close(fd);
- if(n<=0){strcpy(bridge_status,"NO RESPONSE");link_ok=0;return;}
- buffer[n]=0;
- if(!strstr(buffer,"200 OK")){strcpy(bridge_status,"BAD RESPONSE");link_ok=0;return;}
- read_value(buffer,"time",bridge_time,sizeof(bridge_time));
- read_value(buffer,"track",bridge_track,sizeof(bridge_track));
- read_value(buffer,"artist",bridge_artist,sizeof(bridge_artist));
- {char num[12]="";read_value(buffer,"battery",num,sizeof(num));battery_pct=atoi(num);}
+ if(rc<0){strcpy(bridge_status,"CONNECT FAILED");close(fd);return;}
+ rc=send(fd,request,strlen(request),0);
+ if(rc<=0){strcpy(bridge_status,"SEND FAILED");close(fd);return;}
+ for(tries=0;tries<12 && total<(int)sizeof(buffer)-1;tries++){
+   n=recv(fd,buffer+total,sizeof(buffer)-1-total,0);
+   if(n<=0)break;
+   total+=n;buffer[total]=0;
+   if(strstr(buffer,"artist=") && strchr(strstr(buffer,"artist="),'\n'))break;
+ }
+ close(fd);
+ if(total<=0){strcpy(bridge_status,"EMPTY RESPONSE");return;}
+ buffer[total]=0;
+ header_end=strstr(buffer,"\r\n\r\n");
+ if(header_end)body=header_end+4;
+ else {header_end=strstr(buffer,"\n\n");body=header_end?header_end+2:buffer;}
+ if(strncmp(buffer,"HTTP/",5)==0 && !strstr(buffer," 200 ")){
+   strcpy(bridge_status,"HTTP ERROR");return;
+ }
+ if(!strstr(body,"battery=")||!strstr(body,"time=")){
+   strcpy(bridge_status,"UNEXPECTED DATA");return;
+ }
+ read_value(body,"time",bridge_time,sizeof(bridge_time));
+ read_value(body,"track",bridge_track,sizeof(bridge_track));
+ read_value(body,"artist",bridge_artist,sizeof(bridge_artist));
+ {char num[12]="";read_value(body,"battery",num,sizeof(num));battery_pct=atoi(num);}
  strcpy(bridge_status,"CONNECTED");link_ok=1;
 }
 static const char *names[] = {"NAVIGATION", "MUSIC", "PHONE", "SETTINGS"};
@@ -125,7 +147,7 @@ static void card(int x,int y,int w,int h,int isselected){rect(x,y,w,h,PANEL);if(
 static void header(void){
  rect(0,0,W,45,RGB(17,27,41));rect(0,44,W,1,RGB(39,61,82));
  label(18,13,"PSP",WHITE,2);label(70,13,"AUTO",BLUE,2);
- label(192,17,"v0.5  BRIDGE TEST",MUTED,1);
+ label(192,17,"v0.5.1  BRIDGE FIX",MUTED,1);
  rect(402,13,9,9,ORANGE);label(418,13,link_ok?"ON":"OFF",link_ok?GREEN:MUTED,1);battery(445,29,GREEN);
 }
 static void footer(const char *msg){rect(0,246,W,26,RGB(17,27,41));label(16,253,msg,MUTED,1);}
@@ -167,7 +189,7 @@ static void phone(void){
 }
 static void settings(void){
  back_header("SETTINGS");rect(18,94,444,141,PANEL);
- label(36,110,"PSP AUTO 0.5",WHITE,2);
+ label(36,110,"PSP AUTO 0.5.1",WHITE,2);
  label(36,149,bridge_status,MUTED,1);
  label(36,170,"MODE: GRAPHICAL DEMONSTRATION",MUTED,1);
  label(36,196,theme?"THEME ACCENT: GREEN":"THEME ACCENT: BLUE",BLUE,1);
